@@ -69,8 +69,9 @@ def cam0_img_compre_callback(image_msg):
     image_np = _cv_bridge.compressed_imgmsg_to_cv2(image_msg)
     undistorted_img = cv2.remap(image_np, map1, map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
     # print("cam_0 shape = ",image_np.shape)
-    # cv2.imshow("distorted0",image_np)
-    # cv2.waitKey(10)
+    cv2.imshow("distorted0",image_np)
+    cv2.imshow("undistorted0",undistorted_img)
+    cv2.waitKey(10)
 
 def cam1_img_compre_callback(image_msg):
     # Get image as np
@@ -98,7 +99,7 @@ def cam3_img_compre_callback(image_msg):
 
 def lidar_callback( scan):
     # rospy.loginfo("Got scan, projecting")
-    ros_cloud = laser_projector.projectLaser(scan)
+    #ros_cloud = laser_projector.projectLaser(scan)
     #pcl_cloud = ros_to_pcl(ros_cloud)
     # Magic here
     print("yes")
@@ -130,18 +131,18 @@ def camera_lidar_calib():
     cam1_subs_topic = '/gmsl_camera/port_0/cam_1/image_raw/compressed'
     cam2_subs_topic = '/gmsl_camera/port_0/cam_2/image_raw/compressed'
     #cam3_subs_topic = '/gmsl_camera/port_0/cam_3/image_raw/compressed'
-    lidar_subs_topic = '/Sensor/points/PointCloud2'
+    lidar_subs_topic = '/Sensor/points'
 
 
     cam0_img_sub = rospy.Subscriber( cam0_subs_topic , CompressedImage, cam0_img_compre_callback, queue_size=1)
     cam1_img_sub = rospy.Subscriber( cam1_subs_topic , CompressedImage, cam1_img_compre_callback, queue_size=1)
     cam2_img_sub = rospy.Subscriber( cam2_subs_topic , CompressedImage, cam2_img_compre_callback, queue_size=1)
     #cam3_img_sub = rospy.Subscriber( cam3_subs_topic , CompressedImage, cam3_img_compre_callback, queue_size=1)
-    lidar_sub = rospy.Subscriber( lidar_subs_topic , PointCloud2, lidar_callback, queue_size=1)
-    #
-    now = rospy.Time.now()
-    (trans,rot) = listener.lookupTransform("/world_broadcaster0","/world_broadcaster1", now)
-
+    lidar_sub = rospy.Subscriber( lidar_subs_topic , PointCloud2, lidar_callback, queue_size=2)
+    # #
+    # now = rospy.Time.now()
+    # (trans,rot) = listener.lookupTransform("/port0_cam0","/Sensor", now)
+    # print(trans,rot)
     # ts = message_filters.TimeSynchronizer([cam0_img_sub, cam1_img_sub, cam2_img_sub], 10)
     # ts.registerCallback(callback)
     rospy.spin()
