@@ -1,0 +1,20 @@
+image_width: 1920
+image_height: 1208
+camera_name: truefisheye
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [693.506921, 0.000000, 955.729444, 0.000000, 694.129349, 641.732500, 0.000000, 0.000000, 1.000000]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 4
+  data: [-0.022636, -0.033855, 0.013493, -0.001831]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.000000, 0.000000, 0.000000, 0.000000, 1.000000, 0.000000, 0.000000, 0.000000, 1.000000]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [300.654994, 0.000000, -2457.553670, 0.000000, 0.000000, 300.924835, 319.640414, 0.000000, 0.000000, 0.000000, 1.000000, 0.000000]
