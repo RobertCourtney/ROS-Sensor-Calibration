@@ -37,6 +37,9 @@ import tf
 
 from std_msgs.msg import String
 from sensor_msgs.msg import Image, CompressedImage, CameraInfo, ChannelFloat32
+from image_geometry import PinholeCameraModel
+from camera_info_manager import CameraInfoManager  ## Needs to install https://github.com/ros-perception/camera_info_manager_py
+
 from std_msgs.msg import Int16
 import sensor_msgs.point_cloud2 as pc2
 from sensor_msgs.msg import LaserScan, PointCloud2
@@ -59,10 +62,27 @@ class camera_lidar_calib(object):
     
         # # Camera rectification?? To be improved: read from .yaml file
         # Put here the calibration of the camera
-        self.DIM    = (1920, 1208)
-        self.K      = np.array([[693.506921, 0.000000, 955.729444], [0.000000, 694.129349, 641.732500], [0.0, 0.0, 1.0]])
-        self.D      = np.array([[-0.022636], [ -0.033855], [0.013493], [-0.001831]])
-        self.map1, self.map2    = cv2.fisheye.initUndistortRectifyMap(self.K, self.D, np.eye(3), self.K, self.DIM, cv2.CV_16SC2) # np.eye(3) here is actually the rotation matrix
+        # self.DIM    = (1920, 1208)
+        # self.K      = np.array([[693.506921, 0.000000, 955.729444], [0.000000, 694.129349, 641.732500], [0.0, 0.0, 1.0]])
+        # self.D      = np.array([[-0.022636], [ -0.033855], [0.013493], [-0.001831]])
+        # self.map1, self.map2    = cv2.fisheye.initUndistortRectifyMap(self.K, self.D, np.eye(3), self.K, self.DIM, cv2.CV_16SC2) # np.eye(3) here is actually the rotation matrix
+
+        #   OR load it from a yaml file
+        self.cameraModel = PinholeCameraModel()
+        
+        # See https://github.com/ros-perception/camera_info_manager_py/tree/master/tests
+        camera_infomanager = CameraInfoManager(cname='truefisheye',url='package://ros_camera_lidar_calib/cfg/truefisheye.yaml') # Select the calibration file 
+        camera_infomanager.loadCameraInfo()
+        self.cameraInfo = camera_infomanager.getCameraInfo()
+        # Crete a camera from camera info
+        self.cameraModel.fromCameraInfo( self.cameraInfo )# Create camera model
+        self.DIM    = (self.cameraInfo.width,self.cameraInfo.height)
+        # Get rectification maps
+        print self.cameraModel.intrinsicMatrix()
+        
+        self.map1, self.map2    = cv2.fisheye.initUndistortRectifyMap(self.cameraModel.intrinsicMatrix(), self.cameraModel.distortionCoeffs(),
+                                np.eye(3), self.cameraModel.intrinsicMatrix(), (self.cameraInfo.width,self.cameraInfo.height), cv2.CV_16SC2) # np.eye(3) here is actually the rotation matrix
+
         
         # # Declare subscribers to get the latest data
         cam0_subs_topic = '/gmsl_camera/port_0/cam_0/image_raw/compressed'
@@ -95,7 +115,7 @@ class camera_lidar_calib(object):
         
     def projection_calibrate(self ):
         # # Main loop: Data projections and alignment on real time
-        rate = rospy.Rate(30.0) # ?
+        rate = rospy.Rate(30) # ?
         rot_trans_matrix = np.empty(0)
         while not rospy.is_shutdown():
             # Get the tfs
@@ -106,15 +126,26 @@ class camera_lidar_calib(object):
                 except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
                     continue
             
-            ## Projections
-            #print(rot_trans_matrix[:3,:])
-            #print( self.pcl_cloud.shape )
-    
-            cloud_pixels = np.dot(  self.K , np.dot(  rot_trans_matrix[:3,:] , self.pcl_cloud[:,:4].T  )  )[:2,:].astype(int)
+            ## Projections: see https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
+            # # project onto camera frame: np.dot(  self.K , np.dot(  rot_trans_matrix[:3,:] , self.pcl_cloud[:,:4].T  )  )[:2,:].astype(int)
+            cloud_oncam =  np.dot(  rot_trans_matrix[:3,:] , self.pcl_cloud[:,:4].T  )
+            # Filter points that wont be on the image: remove points behind the camera plane
+            cloud_oncam = cloud_oncam[:,cloud_oncam[2,:]>0.01]
+            cloud_oncam_2d = cloud_oncam/cloud_oncam[2,:] # project 3D to 2D plane
+            
+            # # Project onto images pixels
+            #cloud_pixels =  np.dot( self.K , cloud_oncam_2d ).astype(int) # [u,v].T, u->x-.Horizontal, v->y->vertical
+            cloud_pixels =  np.dot(  np.array(self.cameraModel.intrinsicMatrix()) , cloud_oncam_2d ).astype(int) # [u,v,1].T, u->x-.Horizontal, v->y->vertical
+            cloud_pixels[2,:] = cloud_oncam[2,:] #Append on the last dim the real depth. Not in camera plane dimensions. DEPTH: [u,v,depth in m].T
+            
             # filter pixels out of img
-            cloud_pixels = cloud_pixels[ : , (cloud_pixels[0,:]>0) & (cloud_pixels[0,:]<self.DIM[1]) & (cloud_pixels[1,:]>0) & (cloud_pixels[1,:]<self.DIM[0]) ] # Filter those points outside the image
-
-            self.cam0_undistorted_img[cloud_pixels[0,:],cloud_pixels[1,:],:] = [0,0,255] # plot onto img the points. We may have intensity or can apply a color map on distance
+            padding = 2
+            cloud_pixels = cloud_pixels[ : , (cloud_pixels[0,:]>padding) & (cloud_pixels[0,:]<(self.DIM[0]-padding)) & (cloud_pixels[1,:]>padding) & (cloud_pixels[1,:]<(self.DIM[1]-padding) ) ] # Filter those points outside the image
+            
+            # Plot markers: Chose any of the methods below
+            self.cam0_undistorted_img[cloud_pixels[1,:],cloud_pixels[0,:],:] = [0,0,255] # plot onto img the points. We may have intensity or can apply a color map on distance
+            # for idx in xrange( cloud_pixels.shape[1] ):
+                # cv2.circle(self.cam0_undistorted_img,(cloud_pixels[0,idx],cloud_pixels[1,idx]), padding, (cloud_pixels[2,idx]*20,0,cloud_pixels[2,idx]*20), -1)
             
             # Show imgs
             cv2.imshow("undistorted0",self.cam0_undistorted_img)
