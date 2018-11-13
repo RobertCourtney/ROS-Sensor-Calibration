@@ -42,10 +42,12 @@ from camera_info_manager import CameraInfoManager  ## Needs to install https://g
 
 from std_msgs.msg import Int16
 import sensor_msgs.point_cloud2 as pc2
-from sensor_msgs.msg import LaserScan, PointCloud2
+from sensor_msgs.msg import LaserScan, PointCloud2, PointField
 from laser_geometry import LaserProjection
 import rosbag
 import cv2
+import lidar_dump_numpy as pcl2_2_np
+
 #import pcl
 import yaml
 import numpy as np
@@ -77,12 +79,9 @@ class camera_lidar_calib(object):
         # Crete a camera from camera info
         self.cameraModel.fromCameraInfo( self.cameraInfo )# Create camera model
         self.DIM    = (self.cameraInfo.width,self.cameraInfo.height)
-        # Get rectification maps
-        print self.cameraModel.intrinsicMatrix()
-        
+        # Get rectification maps        
         self.map1, self.map2    = cv2.fisheye.initUndistortRectifyMap(self.cameraModel.intrinsicMatrix(), self.cameraModel.distortionCoeffs(),
                                 np.eye(3), self.cameraModel.intrinsicMatrix(), (self.cameraInfo.width,self.cameraInfo.height), cv2.CV_16SC2) # np.eye(3) here is actually the rotation matrix
-
         
         # # Declare subscribers to get the latest data
         cam0_subs_topic = '/gmsl_camera/port_0/cam_0/image_raw/compressed'
@@ -95,7 +94,7 @@ class camera_lidar_calib(object):
         #self.cam1_img_sub   = rospy.Subscriber( cam1_subs_topic , CompressedImage, self.cam1_img_compre_callback, queue_size=1)
         #self.cam2_img_sub   = rospy.Subscriber( cam2_subs_topic , CompressedImage, self.cam2_img_compre_callback, queue_size=1)
         #self.cam3_img_sub  = rospy.Subscriber( cam3_subs_topic , CompressedImage, self.cam3_img_compre_callback, queue_size=1)
-        self.lidar_sub      = rospy.Subscriber( lidar_subs_topic , PointCloud2, self.ros_to_pcl, queue_size=2)
+        self.lidar_sub      = rospy.Subscriber( lidar_subs_topic , PointCloud2, self.lidar_callback, queue_size=1)
         # Get the tfs
         self.tf_listener = tf.TransformListener()
         
@@ -108,9 +107,12 @@ class camera_lidar_calib(object):
         self.cam2_undistorted_img   = np.empty( (self.DIM[1],self.DIM[0],3) )
         self.cam3_image_np          = np.empty( (self.DIM[1],self.DIM[0],3) )
         self.cam3_undistorted_img   = np.empty( (self.DIM[1],self.DIM[0],3) )
-        self.pcl_cloud              = np.empty( (500,4) ) # Do not know the width of a normal scan. ight be variable too......
+        self.pcl_cloud              = np.empty( (500,4) ) # Do not know the width of a normal scan. might be variable too......
+        
+        self.now = rospy.Time.now()
         
         # # Main loop: Data projections and alignment on real time
+        self.lidar_angle_range_interest = [-40,40] # From -180 to 180. Front is 0deg. Put the range of angles we may want to get points from. Depending of camera etc
         thread.start_new_thread(self.projection_calibrate())
         
     def projection_calibrate(self ):
@@ -127,10 +129,10 @@ class camera_lidar_calib(object):
                     continue
             
             ## Projections: see https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
-            # # project onto camera frame: np.dot(  self.K , np.dot(  rot_trans_matrix[:3,:] , self.pcl_cloud[:,:4].T  )  )[:2,:].astype(int)
+            # # project onto camera frame:
             cloud_oncam =  np.dot(  rot_trans_matrix[:3,:] , self.pcl_cloud[:,:4].T  )
             # Filter points that wont be on the image: remove points behind the camera plane
-            cloud_oncam = cloud_oncam[:,cloud_oncam[2,:]>0.01]
+            #cloud_oncam = cloud_oncam[:,cloud_oncam[2,:]>0.01]
             cloud_oncam_2d = cloud_oncam/cloud_oncam[2,:] # project 3D to 2D plane
             
             # # Project onto images pixels
@@ -159,59 +161,65 @@ class camera_lidar_calib(object):
     def cam0_img_compre_callback(self,image_msg):
         # Get image as np
         self.cam0_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
+        #self.cam0_image_np = cv2.imdecode( np.fromstring(image_msg.data, np.uint8) , cv2.IMREAD_COLOR) # OpenCV >= 3.0:
+        
         self.cam0_undistorted_img = cv2.remap(self.cam0_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
-        # print("cam_0 shape = ",self.cam0_image_np.shape)
-        ##cv2.imshow("distorted0",self.cam0_image_np)
-        ##cv2.imshow("undistorted0",self.cam0_undistorted_img)
-        ##cv2.waitKey(10)
 
     def cam1_img_compre_callback(self,image_msg):
         # Get image as np
         self.cam1_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
         self.cam1_undistorted_img = cv2.remap(self.cam0_image_np,  self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
-        # print("cam_1 shape = ",self.cam0_image_np.shape)
-        # cv2.imshow("distorted1",self.cam0_image_np)
-        # cv2.waitKey(10)
 
     def cam2_img_compre_callback(self,image_msg):
         # Get image as np
         self.cam2_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
         self.cam2_undistorted_img = cv2.remap(self.cam0_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
-        # print("cam_2 shape = ",self.cam0_image_np.shape)
-        # cv2.imshow("distorted2",self.cam0_image_np)
-        # cv2.waitKey(10)
 
     def cam3_img_compre_callback(self,image_msg):
         # Get image as np
         self.cam3_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
         self.cam3_undistorted_img = cv2.remap(self.cam0_image_np,  self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
-        # print("cam_3 shape = ",self.cam0_image_np.shape)
-        # cv2.imshow("distorted3",self.cam0_image_np)
-        # cv2.waitKey(10)
 
-    def lidar_callback(self, scan): # scan msg has the following format http://docs.ros.org/jade/api/sensor_msgs/html/msg/PointCloud2.html
-        rospy.loginfo("Got scan, projecting")
-        #ros_cloud_msg = self._laser_projector.projectLaser(scan)
-        # Lidar filtering?? In case of angular filtering?
-        # ros_cloud_msg 
-        #self.pcl_cloud = self.ros_to_pcl(ros_cloud_msg)
-        
-    def ros_to_pcl(self,ros_cloud):
+    
+    def lidar_callback(self,lidar_scan):
         """ Converts a ROS PointCloud2 message to a pcl PointXYZRGB
             Args:
-                ros_cloud (PointCloud2): ROS PointCloud2 message
+                lidar_scan (PointCloud2): ROS PointCloud2 message
             Returns:
-                pcl.PointCloud_PointXYZRGB: PCL XYZRGB point cloud
+                np pointcloud: numpy XYZ1I point cloud
         """
-        points_list = []
-        for data in pc2.read_points(ros_cloud, skip_nans=True):
-            points_list.append([data[0], data[1], data[2],1.0, data[3]])
-        #pcl_data = pcl.PointCloud_PointXYZRGB()
-        #pcl_data.from_list(points_list)
+        # points_list = []
+        # for data in pc2.read_points(lidar_scan, skip_nans=True):
+            # points_list.append([data[0], data[1], data[2],1.0])
+        # self.pcl_cloud = np.array(points_list)
         
-        self.pcl_cloud = np.array(points_list)
-
-    def spin():
+        # 2nd method
+        #self.pcl_cloud =  np.array( list(pc2.read_points(lidar_scan, skip_nans=True)) )
+        
+        # 3rd method
+        nparr = pcl2_2_np.msg_to_arr(lidar_scan)
+        width = nparr.shape[1]
+        m = width/360
+        self.pcl_cloud = self.lidar_map_flatten( nparr[:, int(width/2.0 + self.lidar_angle_range_interest[0]*m):int(width/2.0 + self.lidar_angle_range_interest[1]*m)]  ) # we cloud filter here by angle!
+        
+        # Debugging tools
+        # print "  Got cloud @ ", 1.0/float(rospy.Time.now().to_sec() - self.now.to_sec()) ," Hz " 
+        # self.now = rospy.Time.now()
+        
+    def lidar_map_flatten(self, nparr):
+        """ Converts a numpy array of (height, width) [x,y,z,i,_] into a flatten np array of [xyz1,numer_of_points]
+            Args:
+                nparr (numpy): numpy array of (8, ~5440) [x,y,z,i,_]
+            Returns:
+                np pointcloud: numpy [xyz1,numer_of_points]  point cloud
+        """
+        pcl_cloud   = np.ones( (nparr.shape[0]*nparr.shape[1],4) )
+        pcl_cloud[:,0]  = np.reshape( nparr['x'], -1 )
+        pcl_cloud[:,1]  = np.reshape( nparr['y'], -1 )
+        pcl_cloud[:,2]  = np.reshape( nparr['z'], -1 )
+        
+        return pcl_cloud
+    def spin(self):
         rospy.spin()
 
 
