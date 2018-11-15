@@ -1,21 +1,20 @@
 <?xml version="1.0"?>
 <launch>
     # Car origin from world: Try to fit the car
-    <node pkg="tf" type="static_transform_publisher" name="world_broadcaster0" args="0 0 0   0 0 0 world car 0"/>
+    <node pkg="tf" type="static_transform_publisher" name="world_broadcaster0" args="0 0 0   0 0 0 world car 100"/>
 
     # Cameras
-    <node  pkg="tf" type="static_transform_publisher" name="world_broadcaster1" args="0 0.06 0.96   -1.5708 0 -1.536 car port0_cam0 0"/>
+    <node  pkg="tf" type="static_transform_publisher" name="world_broadcaster1" args="0 0.06 0.96   -1.5708 0 -1.536 car port0_cam0 100"/>
 
-    <node   pkg="tf" type="static_transform_publisher" name="world_broadcaster2" args="-1 -1.6 1.13   3.1416 0 -0.698 car port0_cam1 0"/>
-    <node   pkg="tf" type="static_transform_publisher" name="world_broadcaster3" args="-4.23 0 1.07   1.5708 0 -2.356 car port0_cam2 0"/>
-    <node   pkg="tf" type="static_transform_publisher" name="world_broadcaster4" args="-1 1.6 1.13   0 0 -2.443 car port0_cam3 0"/>
+    <node   pkg="tf" type="static_transform_publisher" name="world_broadcaster2" args="-1 -1.6 1.13   3.1416 0 -0.698 car port0_cam1 100"/>
+    <node   pkg="tf" type="static_transform_publisher" name="world_broadcaster3" args="-4.23 0 1.07   1.5708 0 -2.356 car port0_cam2 100"/>
+    <node   pkg="tf" type="static_transform_publisher" name="world_broadcaster4" args="-1 1.6 1.13   0 0 -2.443 car port0_cam3 100"/>
 
-    # Lidar 
-    <node   pkg="tf" type="static_transform_publisher" name="world_broadcaster5" args="-2.27 -0.4375 1.18   0 0.139 0 car Sensor 0"/>
-     
+    # Lidar
+    <node   pkg="tf" type="static_transform_publisher" name="world_broadcaster5" args="-2.27 -0.4375 1.18   0 0.139 0 car Sensor 100"/>
+
     # Calibration node
     <node  pkg="ros_camera_lidar_calib" type="ros_camera_lidar_calib_node.py" name="ros_camera_lidar_calib_node" output="screen"/>
-    
-    
-</launch>
 
+
+</launch>

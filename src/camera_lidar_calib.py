@@ -5,7 +5,7 @@
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
 # are met:
-# 
+#
 #  * Redistributions of source code must retain the above copyright
 #    notice, this list of conditions and the following disclaimer.
 #  * Redistributions in binary form must reproduce the above
@@ -61,7 +61,7 @@ class camera_lidar_calib(object):
     def __init__(self):
         self._cv_bridge = CvBridge()
         self._laser_projector = LaserProjection()
-    
+
         # # Camera rectification?? To be improved: read from .yaml file
         # Put here the calibration of the camera
         # self.DIM    = (1920, 1208)
@@ -71,18 +71,18 @@ class camera_lidar_calib(object):
 
         #   OR load it from a yaml file
         self.cameraModel = PinholeCameraModel()
-        
+
         # See https://github.com/ros-perception/camera_info_manager_py/tree/master/tests
-        camera_infomanager = CameraInfoManager(cname='truefisheye',url='package://ros_camera_lidar_calib/cfg/truefisheye.yaml') # Select the calibration file 
+        camera_infomanager = CameraInfoManager(cname='truefisheye',url='package://ros_camera_lidar_calib/cfg/truefisheye.yaml') # Select the calibration file
         camera_infomanager.loadCameraInfo()
         self.cameraInfo = camera_infomanager.getCameraInfo()
         # Crete a camera from camera info
         self.cameraModel.fromCameraInfo( self.cameraInfo )# Create camera model
         self.DIM    = (self.cameraInfo.width,self.cameraInfo.height)
-        # Get rectification maps        
+        # Get rectification maps
         self.map1, self.map2    = cv2.fisheye.initUndistortRectifyMap(self.cameraModel.intrinsicMatrix(), self.cameraModel.distortionCoeffs(),
                                 np.eye(3), self.cameraModel.intrinsicMatrix(), (self.cameraInfo.width,self.cameraInfo.height), cv2.CV_16SC2) # np.eye(3) here is actually the rotation matrix
-        
+
         # # Declare subscribers to get the latest data
         cam0_subs_topic = '/gmsl_camera/port_0/cam_0/image_raw/compressed'
         cam1_subs_topic = '/gmsl_camera/port_0/cam_1/image_raw/compressed'
@@ -97,7 +97,7 @@ class camera_lidar_calib(object):
         self.lidar_sub      = rospy.Subscriber( lidar_subs_topic , PointCloud2, self.lidar_callback, queue_size=1)
         # Get the tfs
         self.tf_listener = tf.TransformListener()
-        
+
         # # Declare the global variables we will use to get the latest info
         self.cam0_image_np          = np.empty( (self.DIM[1],self.DIM[0],3) )
         self.cam0_undistorted_img   = np.empty( (self.DIM[1],self.DIM[0],3) )
@@ -108,13 +108,13 @@ class camera_lidar_calib(object):
         self.cam3_image_np          = np.empty( (self.DIM[1],self.DIM[0],3) )
         self.cam3_undistorted_img   = np.empty( (self.DIM[1],self.DIM[0],3) )
         self.pcl_cloud              = np.empty( (500,4) ) # Do not know the width of a normal scan. might be variable too......
-        
+
         self.now = rospy.Time.now()
-        
+
         # # Main loop: Data projections and alignment on real time
-        self.lidar_angle_range_interest = [-40,40] # From -180 to 180. Front is 0deg. Put the range of angles we may want to get points from. Depending of camera etc
+        self.lidar_angle_range_interest = [-20,20] # From -180 to 180. Front is 0deg. Put the range of angles we may want to get points from. Depending of camera etc
         thread.start_new_thread(self.projection_calibrate())
-        
+
     def projection_calibrate(self ):
         # # Main loop: Data projections and alignment on real time
         rate = rospy.Rate(30) # ?
@@ -125,44 +125,48 @@ class camera_lidar_calib(object):
                 try:
                     (trans,rot) = self.tf_listener.lookupTransform("/port0_cam0","/Sensor", rospy.Time(0)) # get different protections here, as needed
                     rot_trans_matrix = self.tf_listener.fromTranslationRotation(trans, rot)
+                    # print(trans)
                 except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
                     continue
-            
+
             ## Projections: see https://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html
             # # project onto camera frame:
             cloud_oncam =  np.dot(  rot_trans_matrix[:3,:] , self.pcl_cloud[:,:4].T  )
             # Filter points that wont be on the image: remove points behind the camera plane
             #cloud_oncam = cloud_oncam[:,cloud_oncam[2,:]>0.01]
             cloud_oncam_2d = cloud_oncam/cloud_oncam[2,:] # project 3D to 2D plane
-            
+
             # # Project onto images pixels
             #cloud_pixels =  np.dot( self.K , cloud_oncam_2d ).astype(int) # [u,v].T, u->x-.Horizontal, v->y->vertical
             cloud_pixels =  np.dot(  np.array(self.cameraModel.intrinsicMatrix()) , cloud_oncam_2d ).astype(int) # [u,v,1].T, u->x-.Horizontal, v->y->vertical
             cloud_pixels[2,:] = cloud_oncam[2,:] #Append on the last dim the real depth. Not in camera plane dimensions. DEPTH: [u,v,depth in m].T
-            
+
             # filter pixels out of img
             padding = 2
             cloud_pixels = cloud_pixels[ : , (cloud_pixels[0,:]>padding) & (cloud_pixels[0,:]<(self.DIM[0]-padding)) & (cloud_pixels[1,:]>padding) & (cloud_pixels[1,:]<(self.DIM[1]-padding) ) ] # Filter those points outside the image
-            
-            # Plot markers: Chose any of the methods below
-            self.cam0_undistorted_img[cloud_pixels[1,:],cloud_pixels[0,:],:] = [0,0,255] # plot onto img the points. We may have intensity or can apply a color map on distance
-            # for idx in xrange( cloud_pixels.shape[1] ):
-                # cv2.circle(self.cam0_undistorted_img,(cloud_pixels[0,idx],cloud_pixels[1,idx]), padding, (cloud_pixels[2,idx]*20,0,cloud_pixels[2,idx]*20), -1)
-            
+
+            image = self.cam0_undistorted_img # improve loop performance by putting it in a variable
+
+            for idx in range(len(cloud_pixels[2])):
+                image[cloud_pixels[1,idx],cloud_pixels[0,idx],:] = [0,0,np.clip(cloud_pixels[2,idx]*20,0,255)]
+
+            self.cam0_undistorted_img=image
+
+
             # Show imgs
             cv2.imshow("undistorted0",self.cam0_undistorted_img)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             # Loop!
             rate.sleep()
-            
+
         cv2.destroyAllWindows()
-        
+
     def cam0_img_compre_callback(self,image_msg):
         # Get image as np
         self.cam0_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
         #self.cam0_image_np = cv2.imdecode( np.fromstring(image_msg.data, np.uint8) , cv2.IMREAD_COLOR) # OpenCV >= 3.0:
-        
+
         self.cam0_undistorted_img = cv2.remap(self.cam0_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
 
     def cam1_img_compre_callback(self,image_msg):
@@ -180,7 +184,7 @@ class camera_lidar_calib(object):
         self.cam3_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
         self.cam3_undistorted_img = cv2.remap(self.cam0_image_np,  self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
 
-    
+
     def lidar_callback(self,lidar_scan):
         """ Converts a ROS PointCloud2 message to a pcl PointXYZRGB
             Args:
@@ -192,24 +196,25 @@ class camera_lidar_calib(object):
         # for data in pc2.read_points(lidar_scan, skip_nans=True):
             # points_list.append([data[0], data[1], data[2],1.0])
         # self.pcl_cloud = np.array(points_list)
-        
+
         # 2nd method
         #self.pcl_cloud =  np.array( list(pc2.read_points(lidar_scan, skip_nans=True)) )
-        
+
         # 3rd method
         nparr = pcl2_2_np.msg_to_arr(lidar_scan)
         width = nparr.shape[1]
         m = width/360
         self.pcl_cloud = self.lidar_map_flatten( nparr[:, int(width/2.0 + self.lidar_angle_range_interest[0]*m):int(width/2.0 + self.lidar_angle_range_interest[1]*m)]  ) # we cloud filter here by angle!
-        
+
         # Debugging tools
-        # print "  Got cloud @ ", 1.0/float(rospy.Time.now().to_sec() - self.now.to_sec()) ," Hz " 
+        # print "  Got cloud @ ", 1.0/float(rospy.Time.now().to_sec() - self.now.to_sec()) ," Hz "
         # self.now = rospy.Time.now()
-        
+
     def lidar_map_flatten(self, nparr):
         """ Converts a numpy array of (height, width) [x,y,z,i,_] into a flatten np array of [xyz1,numer_of_points]
             Args:
-                nparr (numpy): numpy array of (8, ~5440) [x,y,z,i,_]
+                nparr (numpy): numpy array of (8, ~5440) [x,y,z,i,_]loud @ ", 1.0/float(rospy.Time.now().to_sec() - self.now.to_sec()) ," Hz "
+        self.now = ros
             Returns:
                 np pointcloud: numpy [xyz1,numer_of_points]  point cloud
         """
@@ -217,9 +222,7 @@ class camera_lidar_calib(object):
         pcl_cloud[:,0]  = np.reshape( nparr['x'], -1 )
         pcl_cloud[:,1]  = np.reshape( nparr['y'], -1 )
         pcl_cloud[:,2]  = np.reshape( nparr['z'], -1 )
-        
+
         return pcl_cloud
     def spin(self):
         rospy.spin()
-
-
