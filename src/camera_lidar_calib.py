@@ -73,7 +73,7 @@ class camera_lidar_calib(object):
         self.cameraModel = PinholeCameraModel()
 
         # See https://github.com/ros-perception/camera_info_manager_py/tree/master/tests
-        camera_infomanager = CameraInfoManager(cname='truefisheye',url='package://ros_camera_lidar_calib/cfg/truefisheye.yaml') # Select the calibration file
+        camera_infomanager = CameraInfoManager(cname='truefisheye',url='package://ros_camera_lidar_calib/cfg/truefisheye800x503.yaml') # Select the calibration file
         camera_infomanager.loadCameraInfo()
         self.cameraInfo = camera_infomanager.getCameraInfo()
         # Crete a camera from camera info
@@ -84,19 +84,24 @@ class camera_lidar_calib(object):
                                 np.eye(3), self.cameraModel.intrinsicMatrix(), (self.cameraInfo.width,self.cameraInfo.height), cv2.CV_16SC2) # np.eye(3) here is actually the rotation matrix
 
         # # Declare subscribers to get the latest data
-        cam0_subs_topic = '/gmsl_camera/port_0/cam_0/image_raw/compressed'
-        cam1_subs_topic = '/gmsl_camera/port_0/cam_1/image_raw/compressed'
-        cam2_subs_topic = '/gmsl_camera/port_0/cam_2/image_raw/compressed'
+        cam0_subs_topic = '/gmsl_camera/port_0/cam_0/image_raw'
+        cam1_subs_topic = '/gmsl_camera/port_0/cam_1/image_raw'
+        cam2_subs_topic = '/gmsl_camera/port_0/cam_2/image_raw'
         #cam3_subs_topic = '/gmsl_camera/port_0/cam_3/image_raw/compressed'
         lidar_subs_topic = '/Sensor/points'
 
-        self.cam0_img_sub   = rospy.Subscriber( cam0_subs_topic , CompressedImage, self.cam0_img_compre_callback, queue_size=1)
+        #self.cam0_img_sub   = rospy.Subscriber( cam0_subs_topic , Image, self.cam0_img_callback, queue_size=1)
+        #self.cam1_img_sub   = rospy.Subscriber( cam1_subs_topic , Image, self.cam1_img_callback, queue_size=1)
+        self.cam2_img_sub   = rospy.Subscriber( cam2_subs_topic , Image, self.cam2_img_callback, queue_size=1)
+        #self.cam0_img_sub   = rospy.Subscriber( cam0_subs_topic , CompressedImage, self.cam0_img_compre_callback, queue_size=1)
         #self.cam1_img_sub   = rospy.Subscriber( cam1_subs_topic , CompressedImage, self.cam1_img_compre_callback, queue_size=1)
         #self.cam2_img_sub   = rospy.Subscriber( cam2_subs_topic , CompressedImage, self.cam2_img_compre_callback, queue_size=1)
         #self.cam3_img_sub  = rospy.Subscriber( cam3_subs_topic , CompressedImage, self.cam3_img_compre_callback, queue_size=1)
-        self.lidar_sub      = rospy.Subscriber( lidar_subs_topic , PointCloud2, self.lidar_callback, queue_size=1)
+        self.lidar_sub = rospy.Subscriber( lidar_subs_topic , PointCloud2, self.lidar_callback, queue_size=1)
         # Get the tfs
         self.tf_listener = tf.TransformListener()
+        #self.lidar_time = rospy.Subscriber(lidar_subs_topic , PointCloud2, self.readtimestamp)
+        #self.img0_time = rospy.Subscriber(cam0_subs_topic , CompressedImage, self.readtimestamp)
 
         # # Declare the global variables we will use to get the latest info
         self.cam0_image_np          = np.empty( (self.DIM[1],self.DIM[0],3) )
@@ -112,7 +117,7 @@ class camera_lidar_calib(object):
         self.now = rospy.Time.now()
 
         # # Main loop: Data projections and alignment on real time
-        self.lidar_angle_range_interest = [-20,20] # From -180 to 180. Front is 0deg. Put the range of angles we may want to get points from. Depending of camera etc
+        self.lidar_angle_range_interest = [0,180] # From -180 to 180. Front is 0deg. Put the range of angles we may want to get points from. Depending of camera etc
         thread.start_new_thread(self.projection_calibrate())
 
     def projection_calibrate(self ):
@@ -123,7 +128,7 @@ class camera_lidar_calib(object):
             # Get the tfs
             if not rot_trans_matrix.shape[0]: # Get the tf is empty
                 try:
-                    (trans,rot) = self.tf_listener.lookupTransform("/port0_cam0","/Sensor", rospy.Time(0)) # get different protections here, as needed
+                    (trans,rot) = self.tf_listener.lookupTransform("/port0_cam3","/Sensor", rospy.Time(0)) # get different protections here, as needed
                     rot_trans_matrix = self.tf_listener.fromTranslationRotation(trans, rot)
                     # print(trans)
                 except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
@@ -145,16 +150,16 @@ class camera_lidar_calib(object):
             padding = 2
             cloud_pixels = cloud_pixels[ : , (cloud_pixels[0,:]>padding) & (cloud_pixels[0,:]<(self.DIM[0]-padding)) & (cloud_pixels[1,:]>padding) & (cloud_pixels[1,:]<(self.DIM[1]-padding) ) ] # Filter those points outside the image
 
-            image = self.cam0_undistorted_img # improve loop performance by putting it in a variable
+            image = self.cam2_undistorted_img # improve loop performance by putting it in a variable
 
             for idx in range(len(cloud_pixels[2])):
                 image[cloud_pixels[1,idx],cloud_pixels[0,idx],:] = [0,0,np.clip(cloud_pixels[2,idx]*20,0,255)]
 
-            self.cam0_undistorted_img=image
-
+            self.cam2_undistorted_img = image
 
             # Show imgs
-            cv2.imshow("undistorted0",self.cam0_undistorted_img)
+            cv2.imshow("undistorted2",self.cam2_undistorted_img)
+            #cv2.imshow("distorted0",self.cam0_image_np)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             # Loop!
@@ -162,27 +167,52 @@ class camera_lidar_calib(object):
 
         cv2.destroyAllWindows()
 
-    def cam0_img_compre_callback(self,image_msg):
+    def readtimestamp(self, data):
+        print(data.header.stamp)
+        #print(data.header.frame_id,data.header.stamp,data.header.seq)
+
+    def cam0_img_callback(self,image_msg):
         # Get image as np
-        self.cam0_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
-        #self.cam0_image_np = cv2.imdecode( np.fromstring(image_msg.data, np.uint8) , cv2.IMREAD_COLOR) # OpenCV >= 3.0:
+        # self.cam0_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
+        self.cam0_image_np = self._cv_bridge.imgmsg_to_cv2(image_msg, "bgr8")
 
         self.cam0_undistorted_img = cv2.remap(self.cam0_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
 
-    def cam1_img_compre_callback(self,image_msg):
+    def cam1_img_callback(self,image_msg):
         # Get image as np
-        self.cam1_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
-        self.cam1_undistorted_img = cv2.remap(self.cam0_image_np,  self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
+        # self.cam0_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
+        self.cam1_image_np = self._cv_bridge.imgmsg_to_cv2(image_msg, "bgr8")
 
-    def cam2_img_compre_callback(self,image_msg):
-        # Get image as np
-        self.cam2_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
-        self.cam2_undistorted_img = cv2.remap(self.cam0_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
+        self.cam1_undistorted_img = cv2.remap(self.cam1_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
 
-    def cam3_img_compre_callback(self,image_msg):
+    def cam2_img_callback(self,image_msg):
         # Get image as np
-        self.cam3_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
-        self.cam3_undistorted_img = cv2.remap(self.cam0_image_np,  self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
+        # self.cam0_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
+        self.cam2_image_np = self._cv_bridge.imgmsg_to_cv2(image_msg, "bgr8")
+
+        self.cam2_undistorted_img = cv2.remap(self.cam2_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
+
+    # def cam0_img_compre_callback(self,image_msg):
+    #     # Get image as np
+    #     self.cam0_image_np = self._cv_bridge.compre_imgmsg_to_cv2(image_msg)
+    #     #self.cam0_image_np = cv2.imdecode( np.fromstring(image_msg.data, np.uint8) , cv2.IMREAD_COLOR) # OpenCV >= 3.0:
+    #
+    #     self.cam0_undistorted_img = cv2.remap(self.cam0_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
+    #
+    # def cam1_img_compre_callback(self,image_msg):
+    #     # Get image as np
+    #     self.cam1_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
+    #     self.cam1_undistorted_img = cv2.remap(self.cam0_image_np,  self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
+    #
+    # def cam2_img_compre_callback(self,image_msg):
+    #     # Get image as np
+    #     self.cam2_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
+    #     self.cam2_undistorted_img = cv2.remap(self.cam0_image_np, self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
+    #
+    # def cam3_img_compre_callback(self,image_msg):
+    #     # Get image as np
+    #     self.cam3_image_np = self._cv_bridge.compressed_imgmsg_to_cv2(image_msg)
+    #     self.cam3_undistorted_img = cv2.remap(self.cam0_image_np,  self.map1,  self.map2, interpolation=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_CONSTANT)
 
 
     def lidar_callback(self,lidar_scan):

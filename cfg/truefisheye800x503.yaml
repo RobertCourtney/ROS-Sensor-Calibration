@@ -1,0 +1,20 @@
+image_width: 800
+image_height: 503
+camera_name: truefisheye800x503
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [295.172810, 0.000000, 397.468143, 0.000000, 293.819240, 271.131046, 0.000000, 0.000000, 1.000000]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 4
+  data: [-0.054984, 0.002834, -0.003268, 0.000539]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.000000, 0.000000, 0.000000, 0.000000, 1.000000, 0.000000, 0.000000, 0.000000, 1.000000]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [295.172810, 0.000000, 397.468143, 0.000000, 0.000000, 293.819240, 271.131046, 0.000000, 0.000000, 0.000000, 1.000000, 0.000000]
