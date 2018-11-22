@@ -15,6 +15,7 @@
 
     # Calibration node
     <node  pkg="ros_camera_lidar_calib" type="ros_camera_lidar_calib_node.py" name="ros_camera_lidar_calib_node" output="screen"/>
-
+    # JLR car
+    <node  name="ros_camera_lidar_calib" pkg="ros_camera_lidar_calib" type="jlr_node.py" output="screen"/>
 
 </launch>
